@@ -70,12 +70,9 @@ int main(int argc, char* argv[]){
       exit(EXIT_FAILURE);
   }else printf("Waiting for connections...\n");
 
-  printf("Made it past listen()\n");
 
   // Server is now ready for clients
-
   for(tmp=0; tmp < MAX; tmp++) clientSockets[tmp] = 0;
-
 
   while(1){
     FD_ZERO(&rset);
