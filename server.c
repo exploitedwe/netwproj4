@@ -10,8 +10,6 @@
 #include <string.h>
 #include <pthread.h>
 
-int c = 300;
-
 #define MAX 100 // Max clients, Max I/O input and output
 
 void *handleClient();
