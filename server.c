@@ -10,12 +10,6 @@
 #include <string.h>
 #include <pthread.h>
 
-//Test Change?
-//TEst Change 2?
-//TEst change 3?
-//TEst change 4?
-//Test change 5?
-
 int c = 300;
 
 #define MAX 100 // Max clients, Max I/O input and output
