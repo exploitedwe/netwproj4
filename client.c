@@ -25,14 +25,17 @@ int main(int argc, char* argv[]){
   }
 
   // IP Assignment and Check
+  skaddr.sin_family = AF_INET;
   skaddr.sin_addr.s_addr = inet_addr(argv[1]);
+  skaddr.sin_port = htons(atoi(argv[2]));
+
   if(skaddr.sin_addr.s_addr == -1){
     printf("Invalid IP Address: %s\n", argv[1]);
     exit(-1);
   }
 
   // Port Assignment
-  skaddr.sin_port = htons(atoi(argv[2]));
+
 
   // Server Connect
   if(connect(sk, (struct sockaddr *) &skaddr, sizeof(skaddr)) < 0) {

@@ -23,10 +23,12 @@ typedef struct param{
 } Param;
 
 int main(int argc, char* argv[]){
-  int     sk, maxfd, incrmnt, tmp, activity,
+  int     sk, client_sk, maxfd, incrmnt, tmp, activity,
           clientAmnt, clientSockets[MAX];
   char    sendline[MAX], rcvline[MAX];
-  struct  sockaddr_in skaddr;
+  struct  sockaddr_in sockaddr;
+
+
   //struct timeval timeout; timeout.tv_sec = 35; //35s until timeout.
   fd_set  rset;
 
@@ -38,84 +40,116 @@ int main(int argc, char* argv[]){
   // Socket Creation
   if( (sk = socket(PF_INET, SOCK_STREAM, 0)) < 0 ){
     fprintf(stderr, "Error creating socket.\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   // Socket Struct Fill-in
-  skaddr.sin_family       = AF_INET;
-  skaddr.sin_addr.s_addr  = htonl(INADDR_ANY);
-  skaddr.sin_port         = htons(atoi(argv[1]));
+  sockaddr.sin_family       = AF_INET;
+  sockaddr.sin_addr.s_addr  = htonl(INADDR_ANY);
+  sockaddr.sin_port         = htons(atoi(argv[1]));
 
 
   // Socket Bind
-  int skaddrSize = sizeof(skaddr);
-  if( bind(sk, (struct sockaddr *) &skaddr, skaddrSize) < 0 ){
+  if( bind(sk, (struct sockaddr *) &sockaddr, sizeof(sockaddr)) < 0 ){
     fprintf(stderr, "Error binding socket.\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   // Double-check Socket works, and print status to console
-  if( getsockname(sk, (struct sockaddr *) &skaddr, &skaddrSize) < 0) {
+  int skaddrSize = sizeof(sockaddr);
+  if( getsockname(sk, (struct sockaddr *) &sockaddr, &skaddrSize) < 0) {
     fprintf(stderr, "Error getting sock name.\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   } else printf("Server [ON]\tSocket [OPEN]\n");
 
-  printf("SERVER DETAILS: IP:%s\tPORT:%d\n", inet_ntoa(skaddr.sin_addr), ntohs(skaddr.sin_port));
+  printf("SERVER DETAILS: IP:%s\tPORT:%d\n", inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
 
   // Start listening w/ backlog (queue) of 100
-  if( listen(sk, 5) < 0){
+  if( listen(sk, 100) < 0){
       fprintf(stderr, "Error listening on socket.\n");
-      exit(-1);
-  }else printf("Waiting for connections...");
+      exit(EXIT_FAILURE);
+  }else printf("Waiting for connections...\n");
 
-
+  printf("Made it past listen()\n");
 
   // Server is now ready for clients
 
+  for(tmp=0; tmp < MAX; tmp++) clientSockets[tmp] = 0;
+
+
   while(1){
-    FD_ZERO(&rset);     // Zero's fd_set
-    FD_SET(sk, &rset);  // Adds master socket to fd_set
-    //FD_SET(fileno(fp), &rset); // Adds file descriptor to fd_set
+    FD_ZERO(&rset);
+    FD_SET(sk, &rset);
+    maxfd = sk;
+    int sd;
+    pthread_t tid;
 
-    // Cycles, finds max file descriptor
-    for(incrmnt=0; incrmnt < clientAmnt; incrmnt++){
-      tmp = clientSockets[incrmnt];
-      if(tmp > maxfd) maxfd = tmp;
+
+    for (tmp = 0 ; tmp < MAX; tmp++){
+        sd = clientSockets[tmp];
+        if(sd > 0) FD_SET(sd , &rset);
+        if(sd > maxfd) maxfd = sd;
     }
 
-    // Select indicates there is a file descriptor (rset) ready for reading
-    if( (activity = select(sk, &rset, NULL, NULL, NULL)) < 0 )
-      fprintf(stderr, "Error with select.\n");
-
-    /* Took this from slide deck, doubt i need its
-    if (FD_ISSET(sk, &rset)) {	// Socket is readable
-			if (readline(sk, recvline, MAX) == 0)
-        fprintf(stderr,"str_cli: server terminated prematurely");
-			fputs(recvline, stdout);
-		}
-
-		if (FD_ISSET(fileno(fp), &rset)) {  // Input is readable
-			if (fgets(sendline, MAX, fp) == NULL) return;
-			writen(sk, sendline, strlen(sendline));
-		}*/
-
-
-    if(activity && FD_ISSET(sk, &rset)){ // Means select saw a file descriptor signal it's ready
-      int sd;
-      struct sockaddr_in from;
-      sd = accept(sk, (struct sockaddr*) &from, &skaddrSize);
-      pthread_t tid;
-      pthread_create(&tid, NULL, &handleClient, &sd);
-      printf("Client thread created.\n");
-      pthread_join(tid, NULL);
-      printf("Client thread joined.\n");
-
+    if(activity = select( maxfd + 1 , &rset , NULL , NULL , NULL) < 0){
+      fprintf(stderr,"Error in select.\n");
+      exit(EXIT_FAILURE);
     }
+
+    if (activity < 0) printf("select error\n");
+
+    if (FD_ISSET(sk, &rset)){
+        if ((client_sk = accept(sk,
+                (struct sockaddr *)&sockaddr, (socklen_t*)&skaddrSize))<0) {
+            perror("accept");
+            exit(EXIT_FAILURE);
+        }
+
+        pthread_create(&tid, NULL, &handleClient, &client_sk);
+
+        // Adds client to master client list
+        for (tmp = 0; tmp < MAX; tmp++){
+            //if position is empty
+            if( clientSockets[tmp] == 0 ){
+                clientSockets[tmp] = client_sk;
+                printf("Adding to list of sockets as %d\n" , tmp);
+                break;
+            }
+        }
+    }
+
+    //else its some IO operation on some other socket
+    /*for (tmp = 0; tmp < MAX; tmp++){
+        sd = clientSockets[tmp];
+        int valread;
+        if (FD_ISSET( sd , &rset)){
+            if ((valread = read( sd , buffer, 999)) == 0){
+                getpeername(sd , (struct sockaddr*)&sockaddr , \
+                    (socklen_t*)&skaddrSize);
+                printf("Host disconnected , ip %s , port %d \n" ,
+                      inet_ntoa(sockaddr.sin_addr) , ntohs(sockaddr.sin_port));
+
+                close( sd );
+                clientSockets[tmp] = 0;
+            }else{
+                buffer[valread] = '\0';
+                send(sd , buffer , strlen(buffer) , 0 );
+            }
+        }
+    }*/
   }
 
   return 0;
 }
-void *handleClient(int *fd){
-  printf("Wow you made it this far! great job you!\n");
-  exit(EXIT_SUCCESS);
+void *handleClient(int *client_sk){
+  char* message = "HELLO";
+  printf("New connection , socket fd is %d\n",*client_sk);
+  //send new connection greeting message
+  if( send(*client_sk, message, strlen(message), 0) != strlen(message) ){
+      fprintf(stderr,"MessageSent\n");
+  }
+  puts("Welcome message sent successfully");
+
+  sleep(100);
+  printf("Exiting client: %d\n", *client_sk);
 }
