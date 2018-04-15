@@ -15,12 +15,12 @@
 void *handleClient();
 
 int activeThreads = 0; //For checking how many threads are currently open.
-//pthread__mutex_t activeTM;  // Lock for accessing activeThreads
-//pthread_cond_t activeTC;    // Cond var for checking if can access aT
+pthread_mutex_t activeTM;  // Lock for accessing activeThreads
+pthread_cond_t activeTC;    // Cond var for checking if can access aT
 
 int clientSockets[MAX];
-//pthread_mutex_t clSockM;
-//pthread_cond_t clSockC;
+pthread_mutex_t clSockM;
+pthread_cond_t clSockC;
 
 typedef struct param{
   int client_sk;
@@ -29,7 +29,7 @@ typedef struct param{
 } Param;
 
 int main(int argc, char* argv[]){
-  int     sk, client_sk, maxfd, i, tmp, activity;
+  int     sk, client_sk, maxfd, i, tmp, activity, totalClients;
   //char    sendline[MAX], rcvline[MAX];
   struct  sockaddr_in sockaddr; // Server socket
   fd_set  rset; // Reading set of file descriptors, used in select()
@@ -74,6 +74,7 @@ int main(int argc, char* argv[]){
 
   // Zero's client list, used for understanding which slots are OPEN
   for(tmp=0; tmp < MAX; tmp++) clientSockets[tmp] = 0;
+  totalClients = 0;
 
   // Server is now ready for clients
   while(1){
@@ -106,6 +107,7 @@ int main(int argc, char* argv[]){
         }
 
         // Adds client to master client list
+        pthread_mutex_lock(&clSockM);
         for (i = 0; i < MAX; i++){
             //if position is empty
             if( clientSockets[i] == 0 ){
@@ -114,6 +116,7 @@ int main(int argc, char* argv[]){
               break;
             }
         }
+        pthread_mutex_unlock(&clSockM);
 
         // Struct for holding the clients needed inputs
         Param *param = malloc(sizeof(Param));// Allocating resources
@@ -122,18 +125,30 @@ int main(int argc, char* argv[]){
 
         // Create thread for handling I/O, pass it it's parameters
         pthread_create(&tid, NULL, &handleClient, (void*) param);
+        pthread_mutex_lock(&activeTM);
+        activeThreads++;
+        pthread_mutex_unlock(&activeTM);
+        totalClients++;
 
+        printf("Active Threads: %d\nTotal Clients: %d\n",activeThreads,totalClients);
     } // End FD_ISSET
   }// End while(1)
 
   return 0;
 }
 void *handleClient(Param *param){
-  printf("New connection , socket fd is %d\n", param->client_sk);
+  int i;
+  //printf("New connection , socket fd is %d\n", param->client_sk);
 
-  
+  sleep(8); //Turn on/off to test multi-client
 
-
-  //sleep(30); //Turn on/off to test multi-client
-  printf("Exiting client: %d\n", param->index);
+  // In OS--CPSC 3220 we learn to release nested locks in reverse request order
+  pthread_mutex_lock(&clSockM);
+  pthread_mutex_lock(&activeTM);
+  activeThreads--;
+  clientSockets[param->index] = 0;
+  pthread_mutex_unlock(&activeTM);
+  pthread_mutex_unlock(&clSockM);
+  printf("Exiting clientSock: %d\n", param->index);
+  free(param);
 }
