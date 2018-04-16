@@ -24,7 +24,6 @@
 #define MAX 100 // Max clients, Max I/O input and output
 
 void *handleClient();
-void reverse(char* line,int n);
 
 // Global so threads can access + their locks to avoid conflict
 int activeThreads = 0;     // For checking how many threads are currently open.
@@ -206,9 +205,10 @@ void *handleClient(Param *param){
   free(inpFileName);
   free(outpFileName);
 
-  // Closing NULL FILE* causes segfault.
   fclose(inputFile);
   fclose(outputFile);
+
+  // Best way to test support of multiple clients is w/ sleep()
   sleep(6);
 
   // In OS--CPSC 3220 we learn to release nested locks in reverse request order
@@ -221,16 +221,4 @@ void *handleClient(Param *param){
   free(param); // Free's the malloc() done in main() for thread parameters
   pthread_mutex_unlock(&activeTM);
   pthread_mutex_unlock(&clSockM);
-}
-void reverse(char* line,int n){
-  int x = 0;
-  char c;
-  char temp;
-
-  for(;x<n/2;x++){
-    c = line[x];
-    temp = line[n-x-1];
-    line[n-x-1] = c;
-    line[x] = temp;
-  }
 }
