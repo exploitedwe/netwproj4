@@ -3,9 +3,10 @@
   Networking & Network Programming: CPSC 3600
   Instructor
 
-
   Project/Homework: 4; Design a simple multi-threaded server.
   Due: April 19, 2018
+
+  MISC: Reader, I used tab-size of 2, 4 might blow out comment blocks.
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@
 #define MAX 100 // Max clients, Max I/O input and output
 
 void *handleClient();
+void reverse(char* line,int n);
 
 // Global so threads can access + their locks to avoid conflict
 int activeThreads = 0;     // For checking how many threads are currently open.
@@ -89,65 +91,37 @@ int main(int argc, char* argv[]){
 
   // Server is now ready for clients
   while(1){
-    FD_ZERO (&rset);
-    FD_SET  (sk, &rset);
+    int client_sk, sd;
+    pthread_t tid;
 
-    maxfd =     sk;
-    int         sd;
-    pthread_t   tid; // pthread identifier
+    client_sk = accept(sk, (struct sockaddr*)&sockaddr, (socklen_t*)&skaddrSize);
 
-    // select needs maxfd as first parameter, this finds the maxfd
-    for (tmp = 0 ; tmp < MAX; tmp++){
-      sd = clientSockets[tmp];
-      if(sd > 0) FD_SET(sd , &rset);
-      if(sd > maxfd) maxfd = sd;
-    }
+    pthread_mutex_lock(&clSockM);
+    for (tmp = 0; clientSockets[tmp] != 0; tmp++);
+    clientSockets[tmp] = client_sk;
+    sd = tmp;
+    pthread_mutex_unlock(&clSockM);
 
-    // Activity notes a change on the reading set, i.e. new client
-    if(activity = select( maxfd + 1 , &rset , NULL , NULL , NULL) < 0){
-      fprintf(stderr,"Error in select.\n");
-      exit(EXIT_FAILURE);
-    }
+    // Struct for holding the clients needed inputs
+    Param *param = malloc(sizeof(Param));// Allocating resources
+    param->client_sk  = client_sk;       // Used for I/O
+    param->index      = sd;               // Used for cleaning up after
 
-    if (FD_ISSET(sk, &rset)){
-        // Accept
-        if ((client_sk = accept(sk, (struct sockaddr *)&sockaddr,
-                (socklen_t*)&skaddrSize)) < 0) {
-          perror("accept");
-          exit(EXIT_FAILURE);
-        }
+    pthread_create(&tid, NULL, &handleClient, (void*) param);
 
-        // Adds client to master client list
-        pthread_mutex_lock(&clSockM);
-        for (i = 0; i < MAX; i++){
-            //if position is empty
-            if( clientSockets[i] == 0 ){
-              clientSockets[i] = client_sk;
-              printf("Adding to list of sockets as %d\n" , i);
-              break;
-            }
-        }
-        pthread_mutex_unlock(&clSockM);
+    pthread_mutex_lock(&activeTM);
+    activeThreads++;
+    pthread_mutex_unlock(&activeTM);
+    totalClients++;
 
-        // Struct for holding the clients needed inputs
-        Param *param = malloc(sizeof(Param));// Allocating resources
-        param->client_sk  = client_sk;       // Used for I/O
-        param->index      = i;               // Used for cleaning up after
-
-        // Create thread for handling I/O, pass it it's parameters
-        pthread_create(&tid, NULL, &handleClient, (void*) param);
-        pthread_mutex_lock(&activeTM);
-        activeThreads++;
-        pthread_mutex_unlock(&activeTM);
-        totalClients++;
-
-        printf("Active Threads: %d\nTotal Clients: %d\n"
-            ,activeThreads,totalClients);
-    } // End FD_ISSET
-  }// End while(1)
+    printf("Active Threads: %d\nTotal Clients: %d\n"
+        ,activeThreads,totalClients);
+  }
 
   return 0;
 }
+
+
 /* Threads Code block --------------------------------------------------------
   So the client has already been accepted, on accept, a client socket--client_sk
   was created. This functions objective is to communicate with the ./client(s)
@@ -165,26 +139,25 @@ int main(int argc, char* argv[]){
   side can at least know what the original file extension is.
 ----------------------------------------------------------------------------*/
 void *handleClient(Param *param){
-  int         i;  // Counter
+  int         i, j;        // Counter/wordcount, Counter
   size_t      buffsize;   // Buffer size, used across differetn buffers
   time_t      rawtime;    // Time handling
-  struct tm*  timeinfo;   // Time handling
-  char        buff[1000], *inpFileName, *outpFileName;
-  FILE*       inputFile = fdopen(param->client_sk,"r"), // Socket to File stream
-              outputFile; // Output file's file stream
+  struct tm   *timeinfo;   // Time handling
+  char        *buff, *inpFileName, *outpFileName, // File buffers and names
+              c, temp, ack[4];    // For reversing strings and ACK
+  FILE        *inputFile = fdopen(param->client_sk,"r"), // Socket to File stream
+              *outputFile; // Output file's file stream
 
-  inpFileName   = malloc(20); // Using array didn't work, so I converted them
-  outpFileName  = malloc(35); //    to simple malloc+free pointers.
+  buff          = malloc(1000);
+  inpFileName   = malloc(20);
+  outpFileName  = malloc(35);
 
 /* Receives file name from client -------------------------------------------
     My protocol for how the client and server interact starts with the client(s)
     sending their
 ---------------------------------------------------------------------------*/
   buffsize = sizeof(char) * 20;
-  i = getline(&inpFileName, &buffsize, inputFile);
-  inpFileName[i] = '\0'; // Add termination character, just to be sure
-  printf("File Name Received: %s\n", inpFileName);
-
+  recv(param->client_sk, inpFileName, buffsize,0);
 
 /* Time handling ----------------------------------------------------------
   Determines [local] time, used in naming an output file that won't
@@ -197,18 +170,46 @@ void *handleClient(Param *param){
 
   //sprintf is like printf/fprintf, but instead you can output to a char*
     //The '+1900' is due to tm_year only storing years since 1900. Odd.
-  sprintf(outpFileName, "%d/%d/%d_%d:%d:%d_%s",
+  sprintf(outpFileName, "%d-%d-%d_%d:%d:%d_%s%s",
       timeinfo->tm_mon, timeinfo->tm_mday, timeinfo->tm_year+1900,
-      timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, inpFileName);
+      timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, inpFileName,".txt");
 
+  outputFile = fopen(outpFileName, "w+b"); // Opens new file with name above
+  if(!outputFile){
+    fprintf(stderr, "fopen error\n");
+    exit(EXIT_FAILURE);
+  }
 
+  buffsize = sizeof(char) * 1000;
+  ack[0] = 'A'; ack[1] = 'C'; ack[2] = 'K'; ack[3] = '\0';
 
+  send(param->client_sk, ack, sizeof(ack), 0);
 
+  while(1){
+    i = recv(param->client_sk, buff, buffsize, 0);
+    if(strncmp(buff, "DONE--EOF",9) == 0) break;
+    buff[i] = '\0';
 
+    j = 0;
+    for(;j < i/2;j++){
+      c = buff[j];
+      temp = buff[i-j-1];
+      buff[i-j-1] = c;
+      buff[j] = temp;
+    }
 
+    fputs(buff, outputFile);
+    send(param->client_sk, ack, sizeof(ack), 0);
+  }
 
+  free(buff);
   free(inpFileName);
   free(outpFileName);
+
+  // Closing NULL FILE* causes segfault.
+  fclose(inputFile);
+  fclose(outputFile);
+  sleep(6);
 
   // In OS--CPSC 3220 we learn to release nested locks in reverse request order
   pthread_mutex_lock(&clSockM);
@@ -216,7 +217,20 @@ void *handleClient(Param *param){
   activeThreads--;
   clientSockets[param->index] = 0;
   printf("Done with connection, closing client_sk: %d\n", param->index);
-  free(param);
+  close(param->client_sk); //Closes socket
+  free(param); // Free's the malloc() done in main() for thread parameters
   pthread_mutex_unlock(&activeTM);
   pthread_mutex_unlock(&clSockM);
+}
+void reverse(char* line,int n){
+  int x = 0;
+  char c;
+  char temp;
+
+  for(;x<n/2;x++){
+    c = line[x];
+    temp = line[n-x-1];
+    line[n-x-1] = c;
+    line[x] = temp;
+  }
 }
