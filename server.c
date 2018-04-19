@@ -8,15 +8,19 @@
 
   MISC: Reader, I used tab-size of 2, 4 might blow out comment blocks.
 */
+
+// Since clients can be really quick, I added the sleep to highlight threads
+#define SLEEP 1 // 0 for false
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>   // socket()
+#include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/select.h>   //select()
+#include <sys/select.h>
 #include <sys/time.h>
 #include <string.h>
 #include <pthread.h>
@@ -83,6 +87,11 @@ int main(int argc, char* argv[]){
       fprintf(stderr, "Error listening on socket.\n");
       exit(EXIT_FAILURE);
   }else printf("Waiting for connections...\n");
+
+  printf("Sleep is currently ");
+  if(SLEEP) printf("[ON]\n");
+  else printf("[OFF]\n");
+
 
   // Zero's client list, used for understanding which slots are OPEN in select
   for(tmp=0; tmp < MAX; tmp++) clientSockets[tmp] = 0;
@@ -151,19 +160,20 @@ void *handleClient(Param *param){
   inpFileName   = malloc(20);
   outpFileName  = malloc(35);
 
-/* Receives file name from client -------------------------------------------
+/* Receives file name from client
     My protocol for how the client and server interact starts with the client(s)
-    sending their
----------------------------------------------------------------------------*/
+    sending their filename
+*/
+
   buffsize = sizeof(char) * 20;
   recv(param->client_sk, inpFileName, buffsize,0);
 
-/* Time handling ----------------------------------------------------------
+/* Time handling
   Determines [local] time, used in naming an output file that won't
   conflict with other clients file names--hopefully.
 
   Format for "time_portion" of header: mm/dd/yyyy_hh:mm:ss --in military hours
----------------------------------------------------------------------------*/
+*/
   time(&rawtime);
   timeinfo = localtime(&rawtime);
 
@@ -189,6 +199,7 @@ void *handleClient(Param *param){
     if(strncmp(buff, "DONE--EOF",9) == 0) break;
     buff[i] = '\0';
 
+    // Reverse char* function below...
     j = 0;
     for(;j < i/2;j++){
       c = buff[j];
@@ -201,6 +212,7 @@ void *handleClient(Param *param){
     send(param->client_sk, ack, sizeof(ack), 0);
   }
 
+  // Memory cleanup
   free(buff);
   free(inpFileName);
   free(outpFileName);
@@ -209,9 +221,10 @@ void *handleClient(Param *param){
   fclose(outputFile);
 
   // Best way to test support of multiple clients is w/ sleep()
-  sleep(6);
+  if(SLEEP) sleep(6);// Thread is active, but job is done, sleeps before cleanup
 
-  // In OS--CPSC 3220 we learn to release nested locks in reverse request order
+
+  // Globals cleanup
   pthread_mutex_lock(&clSockM);
   pthread_mutex_lock(&activeTM);
   activeThreads--;
